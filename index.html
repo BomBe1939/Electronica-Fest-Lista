@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="ca">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Llista de la festa</title>
+<style>
+:root{--bg:#faf7f2;--card:#fff;--tx:#2b2622;--mut:#7a7068;--ac:#d9480f;--ac2:#fff;--bd:#e6ded3;color-scheme:light}
+@media (prefers-color-scheme:dark){:root{--bg:#1c1917;--card:#292524;--tx:#f5f0ea;--mut:#a8a29e;--ac:#fb923c;--ac2:#1c1917;--bd:#3d3733;color-scheme:dark}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--tx);font-family:system-ui,-apple-system,"Segoe UI",sans-serif;line-height:1.4}
+main{max-width:760px;margin:0 auto;padding:20px 16px 40px}
+h1{font-size:1.6rem;margin:0 0 4px}
+.sub{color:var(--mut);margin:0 0 18px;font-size:.95rem}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:14px;padding:16px;margin-bottom:16px}
+h2{font-size:1.1rem;margin:0 0 10px}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:8px}
+input{font:inherit;color:var(--tx);background:var(--bg);border:1px solid var(--bd);border-radius:10px;padding:10px;min-width:0}
+input.w{flex:1 1 200px}
+input[type=number]{width:80px}
+button{font:inherit;cursor:pointer;border:0;border-radius:10px;padding:10px 14px;background:var(--ac);color:var(--ac2);font-weight:600}
+button.g{background:transparent;color:var(--mut);border:1px solid var(--bd);padding:4px 9px}
+.tablewrap{overflow-x:auto}
+table{width:100%;border-collapse:collapse;font-size:.95rem}
+th,td{text-align:left;padding:8px 6px;border-bottom:1px solid var(--bd)}
+th{color:var(--mut);font-weight:500;font-size:.8rem}
+td.r,th.r{text-align:right}
+.empty{color:var(--mut);padding:10px 0}
+.tot{display:flex;justify-content:space-between;font-size:1.2rem;font-weight:700;margin-top:12px}
+.pill{display:inline-block;background:var(--bg);border:1px solid var(--bd);border-radius:99px;padding:3px 10px;margin:3px 4px 0 0;font-size:.85rem}
+#status{font-size:.85rem;color:var(--mut);margin-bottom:12px}
+</style>
+</head>
+<body>
+<main>
+<h1>🎉 Llista de la festa</h1>
+<p class="sub">Posa el teu nom i escriu què vols. La llista és de tothom i s’actualitza sola.</p>
+<div id="status">Connectant…</div>
+
+<div class="card">
+  <h2>✍️ Afegeix a la llista</h2>
+  <div class="row"><input class="w" id="nom" placeholder="El teu nom (ex. Marta)" maxlength="40"></div>
+  <div class="row">
+    <input class="w" id="desc" placeholder="Descripció (ex. Cervesa, patates, gel…)" maxlength="100">
+    <input type="number" id="q" min="1" max="999" value="1" aria-label="Quantitat">
+    <button id="addBtn">Afegeix</button>
+  </div>
+</div>
+
+<div class="card">
+  <h2>📋 Llista</h2>
+  <div class="tablewrap" id="bag"></div>
+  <div class="tot"><span>Total (persones)</span><span id="tot">0</span></div>
+  <h2 style="margin-top:16px">Per persona</h2>
+  <div id="who"></div>
+</div>
+</main>
+
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+import { getFirestore, collection, addDoc, deleteDoc, doc, onSnapshot, query, orderBy } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+
+// 👇 PEGA AQUÍ LA CONFIGURACIÓ DE FIREBASE (veure instruccions)
+const firebaseConfig = {
+  apiKey: "PEGA_AQUI",
+  authDomain: "PEGA_AQUI",
+  projectId: "PEGA_AQUI",
+  appId: "PEGA_AQUI"
+};
+
+const $ = id => document.getElementById(id);
+const status = t => { $("status").textContent = t; };
+const esc = s => String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+let db, uid = null, items = [];
+
+try { $("nom").value = localStorage.getItem("nom") || ""; } catch(e){}
+$("nom").addEventListener("input", () => { try { localStorage.setItem("nom", $("nom").value); } catch(e){} });
+
+function render(){
+  $("bag").innerHTML = items.length
+    ? `<table><tr><th>Descripció</th><th class="r">Quant.</th><th>Qui</th><th></th></tr>` +
+      items.map(x=>`<tr><td>${esc(x.n)}</td><td class="r">${esc(x.q)}</td><td>${esc(x.who)}</td><td>${(uid && x.uid===uid) ? `<button class="g" data-del="${esc(x.id)}" aria-label="Esborra">✕</button>` : ""}</td></tr>`).join("") + `</table>`
+    : `<div class="empty">Encara no s’ha afegit res.</div>`;
+  const by = {};
+  items.forEach(x => { const k = String(x.who || "").trim().toLowerCase(); if (!k) return; (by[k] = by[k] || {name: String(x.who).trim(), n: 0}).n += 1; });
+  const ks = Object.keys(by);
+  $("tot").textContent = ks.length;
+  $("who").innerHTML = ks.map(k=>`<span class="pill">${esc(by[k].name)}: ${by[k].n}</span>`).join("") || `<span class="empty">—</span>`;
+}
+
+async function add(){
+  const who = $("nom").value.trim(), n = $("desc").value.trim();
+  if (!who) { status("Escriu primer el teu nom 🙂"); $("nom").focus(); return; }
+  if (!n) { status("Escriu una descripció."); $("desc").focus(); return; }
+  if (!uid) { status("Encara connectant, torna-ho a provar en un segon."); return; }
+  const q = Math.min(999, Math.max(1, parseInt($("q").value) || 1));
+  try {
+    await addDoc(collection(db, "items"), {n, q, who, uid, t: Date.now()});
+    $("desc").value = ""; $("q").value = 1; status("Afegit ✔");
+  } catch(e){ status("No s’ha pogut afegir."); console.error(e); }
+}
+
+$("addBtn").addEventListener("click", add);
+$("desc").addEventListener("keydown", e => { if (e.key === "Enter") add(); });
+$("bag").addEventListener("click", async e => {
+  const id = e.target.dataset && e.target.dataset.del;
+  if (!id) return;
+  try { await deleteDoc(doc(db, "items", id)); } catch(err){ status("No s’ha pogut esborrar."); }
+});
+
+render();
+if (firebaseConfig.apiKey.startsWith("PEGA")) {
+  status("Falta pegar la configuració de Firebase al codi (mira les instruccions).");
+} else {
+  try {
+    const app = initializeApp(firebaseConfig);
+    db = getFirestore(app);
+    const auth = getAuth(app);
+    onAuthStateChanged(auth, u => { uid = u ? u.uid : null; render(); });
+    await signInAnonymously(auth);
+    onSnapshot(query(collection(db, "items"), orderBy("t")), snap => {
+      items = snap.docs.map(d => ({id: d.id, ...d.data()}));
+      status("En directe · s’actualitza sola"); render();
+    }, err => { status("No s’ha pogut carregar la llista."); console.error(err); });
+  } catch(e){ status("No s’ha pogut connectar amb Firebase."); console.error(e); }
+}
+</script>
+</body>
+</html>
